@@ -12,6 +12,8 @@ async function bootstrap() {
 
   app.useGlobalPipes(new ValidationPipe());
 
+  if (process.env.NODE_ENV !== 'production') app.enableCors();
+
   const config = new DocumentBuilder()
     .setTitle('HH Hack2025')
     .setVersion('1.0')
