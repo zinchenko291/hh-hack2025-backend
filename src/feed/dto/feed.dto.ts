@@ -1,17 +1,29 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Exclude, Expose } from 'class-transformer';
-import { IsArray, IsOptional } from 'class-validator';
 
 @Exclude()
 export default class FeedDto {
   @Expose()
   @ApiProperty()
-  @IsArray()
-  feeds: string[];
+  id: string
 
   @Expose()
-  @ApiProperty({ required: false })
-  @IsArray()
-  @IsOptional()
-  queryTerms?: string[];
+  @ApiProperty()
+  link: string
+
+  @Expose()
+  @ApiProperty()
+  published: string
+
+  @Expose()
+  @ApiProperty()
+  source: string
+
+  @Expose()
+  @ApiProperty()
+  summary: string
+
+  @Expose()
+  @ApiProperty()
+  title: string
 }
