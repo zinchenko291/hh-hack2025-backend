@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import configuration from 'src/config/configuration';
 import { AggregatedItemInput, NormalizedFeedItem } from 'src/rss/rss.types';
 
@@ -9,9 +9,16 @@ type CacheEntry = {
 
 @Injectable()
 export class SummarizerService {
+  private readonly logger = new Logger(SummarizerService.name);
+
   constructor() {}
 
   private summaryCache = new Map<string, CacheEntry>();
+
+  private ollamaHealthCache: {
+    lastCheckedAt: number;
+    healthy: boolean;
+  } | null = null;
 
   private makeCacheKey(
     text: string,
@@ -73,6 +80,57 @@ export class SummarizerService {
     );
   }
 
+  private async ensureModelPulled(ollamaHost: string, model: string) {
+    const ollamaConfig = configuration.ollama;
+    if (
+      this.ollamaHealthCache &&
+      Date.now() - this.ollamaHealthCache.lastCheckedAt <
+        ollamaConfig.timeoutMs
+    ) {
+      if (this.ollamaHealthCache.healthy) {
+        return;
+      }
+    }
+
+    try {
+      const url = new URL('/api/pull', ollamaHost);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(
+        () => controller.abort(),
+        configuration.ollama.pullTimeoutMs
+      );
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        signal: controller.signal,
+        body: JSON.stringify({ name: model, stream: false }),
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(
+          `Failed to pull model ${model}: ${response.status} ${text}`
+        );
+      }
+
+      this.ollamaHealthCache = {
+        healthy: true,
+        lastCheckedAt: Date.now(),
+      };
+    } catch (error) {
+      this.ollamaHealthCache = {
+        healthy: false,
+        lastCheckedAt: Date.now(),
+      };
+      throw error;
+    }
+  }
+
   private async summarize(text: string, hint?: string): Promise<string> {
     const trimmed = (text || '').trim();
     if (trimmed.length === 0) {
@@ -106,7 +164,9 @@ export class SummarizerService {
     );
 
     try {
-      const response = await fetch(`${ollamaConfig.host}/api/generate`, {
+      await this.ensureModelPulled(ollamaConfig.host, ollamaConfig.model);
+      const url = new URL('/api/generate', ollamaConfig.host);
+      const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

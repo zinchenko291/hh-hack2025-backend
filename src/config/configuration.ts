@@ -9,6 +9,13 @@ export default {
       ? Number(process.env.OLLAMA_TEMPERATURE)
       : 0.2,
     timeoutMs: Number(process.env.OLLAMA_TIMEOUT_MS) || 15_000,
+    pullTimeoutMs:
+      Number(process.env.OLLAMA_PULL_TIMEOUT_MS) || 5 * 60 * 1000,
+    autoPull: process.env.OLLAMA_AUTO_PULL
+      ? ['true', '1', 'yes'].includes(
+          process.env.OLLAMA_AUTO_PULL.trim().toLowerCase()
+        )
+      : false,
   },
   summarizer: {
     fallbackCharLimit: Number(process.env.FALLBACK_CHAR_LIMIT) || 420,
