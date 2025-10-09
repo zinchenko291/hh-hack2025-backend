@@ -1,11 +1,13 @@
+import { InjectRedis } from '@liaoliaots/nestjs-redis';
 import { Injectable } from '@nestjs/common';
 import Parser from 'rss-parser';
 import { NormalizedFeedItem, RSSFeed, RSSItem } from './rss.types';
 import configuration from 'src/config/configuration';
+import type { Redis } from 'ioredis';
 
 @Injectable()
 export class RssService {
-  constructor() {
+  constructor(@InjectRedis() private readonly redis: Redis) {
     this.parser = new Parser({
       defaultRSS: 2.0,
       headers: {
@@ -97,7 +99,36 @@ export class RssService {
     return new Date().toISOString();
   }
 
+  private async getFromCache(feedUrl: string): Promise<NormalizedFeedItem[] | null> {
+    try {
+      const cached = await this.redis.get(feedUrl);
+      if (!cached) {
+        return null;
+      }
+      const parsed = JSON.parse(cached) as NormalizedFeedItem[];
+      if (!Array.isArray(parsed)) {
+        return null;
+      }
+      return parsed;
+    } catch {
+      return null;
+    }
+  }
+
+  private async saveToCache(feedUrl: string, items: NormalizedFeedItem[]): Promise<void> {
+    try {
+      await this.redis.set(feedUrl, JSON.stringify(items), 'PX', configuration.redis.ttlMs);
+    } catch {
+      // ignore cache errors
+    }
+  }
+
   async loadFeed(feedUrl: string) {
+    const cached = await this.getFromCache(feedUrl);
+    if (cached) {
+      return cached;
+    }
+
     const xml = await this.fetchWithTimeout(feedUrl);
     const feed: RSSFeed = await this.parser.parseString(xml);
     const feedHost =
@@ -106,7 +137,7 @@ export class RssService {
 
     const items = feed.items?.slice(0, configuration.feed.maxItems) ?? [];
 
-    return items
+    const result = items
       .map((item) => {
         if (!item.title || !item.link) {
           return null;
@@ -126,5 +157,9 @@ export class RssService {
         } as NormalizedFeedItem;
       })
       .filter((item): item is NormalizedFeedItem => item !== null);
+
+    await this.saveToCache(feedUrl, result);
+
+    return result;
   }
 }

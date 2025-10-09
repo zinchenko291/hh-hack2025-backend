@@ -11,4 +11,8 @@ export default {
   useragent: process.env.USER_AGENT ?? 'NewsAggregatorBot/1.0',
   maxCacheEntries: 500,
   cacheTTLMs: 60 * 60 * 1000,
+  redis: {
+    url: process.env.REDIS_URL ?? 'redis://127.0.0.1:6379',
+    ttlMs: Number(process.env.REDIS_TTL_MS) || 5 * 60 * 1000,
+  },
 };
