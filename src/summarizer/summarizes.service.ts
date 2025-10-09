@@ -1,5 +1,4 @@
 import { Injectable } from '@nestjs/common';
-import OpenAI from 'openai';
 import configuration from 'src/config/configuration';
 import { AggregatedItemInput, NormalizedFeedItem } from 'src/rss/rss.types';
 
@@ -17,10 +16,10 @@ export class SummarizerService {
   private makeCacheKey(
     text: string,
     hint: string | undefined,
-    model: string | undefined,
+    model: string,
     apiEnabled: boolean
   ): string {
-    const mode = apiEnabled ? (model ?? 'gpt-4o-mini') : 'fallback';
+    const mode = apiEnabled ? model : 'fallback';
     return `${mode}::${hint ?? ''}::${text}`;
   }
 
@@ -68,7 +67,10 @@ export class SummarizerService {
       .slice(0, 3)
       .join(' ');
     const fallback = sentences || text;
-    return this.clampLength(fallback, configuration.openai.fallbackCharLimit);
+    return this.clampLength(
+      fallback,
+      configuration.summarizer.fallbackCharLimit
+    );
   }
 
   private async summarize(text: string, hint?: string): Promise<string> {
@@ -77,41 +79,64 @@ export class SummarizerService {
       return '';
     }
 
-    const apiKey = configuration.openai.key;
-    const model = configuration.openai.model;
-    const cacheKey = this.makeCacheKey(trimmed, hint, model, Boolean(apiKey));
+    const minLength = configuration.summarizer.minInputLength;
+    const charLimit = configuration.summarizer.fallbackCharLimit;
+    const ollamaConfig = configuration.ollama;
+    const cacheKey = this.makeCacheKey(
+      trimmed,
+      hint,
+      ollamaConfig.model,
+      Boolean(ollamaConfig.enabled)
+    );
     const cached = this.getCachedSummary(cacheKey);
     if (cached) {
       return cached;
     }
 
-    if (trimmed.length < 40 || !apiKey) {
+    if (trimmed.length < minLength || !ollamaConfig.enabled) {
       const summary = this.fallbackSummary(trimmed);
       this.setCachedSummary(cacheKey, summary);
       return summary;
     }
 
-    try {
-      const client = new OpenAI({ apiKey });
-      const prompt =
-        `Summarize the text in 2-3 sentences (up to ~360 characters). ` +
-        `Keep it concise and factual. ${hint ? `Context: ${hint}. ` : ''}` +
-        `Text:\n${trimmed}`;
+    const abortController = new AbortController();
+    const timeoutId = setTimeout(
+      () => abortController.abort(),
+      ollamaConfig.timeoutMs
+    );
 
-      const response = await client.chat.completions.create({
-        model,
-        messages: [
-          { role: 'system', content: 'You are a concise news editor.' },
-          { role: 'user', content: prompt },
-        ],
-        temperature: 0.2,
-        max_tokens: 220,
+    try {
+      const response = await fetch(`${ollamaConfig.host}/api/generate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        signal: abortController.signal,
+        body: JSON.stringify({
+          model: ollamaConfig.model,
+          prompt:
+            `Summarize the text in 2-3 sentences (<= ${charLimit} chars). ` +
+            `Keep it concise and factual. ${hint ? `Context: ${hint}. ` : ''}` +
+            `Text:\n${trimmed}`,
+          options: {
+            temperature: ollamaConfig.temperature,
+          },
+          stream: false,
+        }),
       });
 
-      const output = response.choices[0]?.message?.content?.trim();
+      if (!response.ok) {
+        throw new Error(`Ollama responded with ${response.status}`);
+      }
+
+      const data = (await response.json()) as
+        | { response?: string }
+        | undefined;
+
+      const output = data?.response?.trim();
       const summary = this.clampLength(
         output && output.length > 0 ? output : this.fallbackSummary(trimmed),
-        configuration.openai.fallbackCharLimit
+        charLimit
       );
       this.setCachedSummary(cacheKey, summary);
       return summary;
@@ -119,6 +144,8 @@ export class SummarizerService {
       const summary = this.fallbackSummary(trimmed);
       this.setCachedSummary(cacheKey, summary);
       return summary;
+    } finally {
+      clearTimeout(timeoutId);
     }
   }
 

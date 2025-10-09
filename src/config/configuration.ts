@@ -1,8 +1,18 @@
 export default {
-  openai: {
-    key: process.env.OPENAI_API_KEY,
-    model: process.env.OPENAI_MODEL ?? 'gpt-4o-mini',
+  ollama: {
+    enabled: process.env.OLLAMA_ENABLED
+      ? process.env.OLLAMA_ENABLED !== 'false'
+      : true,
+    host: process.env.OLLAMA_HOST ?? 'http://127.0.0.1:11434',
+    model: process.env.OLLAMA_MODEL ?? 'llama3.1:8b',
+    temperature: process.env.OLLAMA_TEMPERATURE
+      ? Number(process.env.OLLAMA_TEMPERATURE)
+      : 0.2,
+    timeoutMs: Number(process.env.OLLAMA_TIMEOUT_MS) || 15_000,
+  },
+  summarizer: {
     fallbackCharLimit: Number(process.env.FALLBACK_CHAR_LIMIT) || 420,
+    minInputLength: Number(process.env.SUMMARIZER_MIN_LENGTH) || 40,
   },
   feed: {
     maxItems: Number(process.env.MAX_ITEMS_PER_FEED) || 20,
