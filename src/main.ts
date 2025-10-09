@@ -11,7 +11,7 @@ async function bootstrap() {
   });
 
   app.useGlobalPipes(new ValidationPipe());
-
+  app.enableShutdownHooks();
   if (process.env.NODE_ENV !== 'production') app.enableCors();
 
   const config = new DocumentBuilder()
